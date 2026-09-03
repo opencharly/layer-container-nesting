@@ -365,9 +365,12 @@ container-nesting:
               id: env-buildah-isolation
               exit_status: 0
               command: sh -c 'env | grep -qx "BUILDAH_ISOLATION=chroot"'
-            - run: podman pull quay.io/libpod/alpine:latest
+            - run: |
+                podman pull quay.io/libpod/alpine:latest
               description: pre-pull the alpine image into the nested store at build time so the runtime nested-podman-run check needs no network (the outer container's aardvark-dns cannot resolve quay.io on some hosts; the build container has working network, so the pull happens here and the runtime check uses --pull=never)
               run_as: "${USER}"
+              command: |
+                podman pull quay.io/libpod/alpine:latest
             - check: command=podman run --rm --pull=never quay.io/libpod/alpine:latest /bin/true
               id: nested-podman-run
               timeout: 60s
