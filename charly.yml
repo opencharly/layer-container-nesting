@@ -803,21 +803,29 @@ container-nesting-skill:
             **Fix** — two layers, root fix first:
             
             1. **Root (source):** the emitter's caches must not live under `/tmp`. This
-               is `opencharly/sdk` (`EmitDownload` `/tmp/downloads`, `EmitCmd` non-root
-               `/tmp/npm-cache` → `/var/cache/charly/...`). Once the SDK is repinned,
-               no candy leaves `/tmp` at `0755`.
-            2. **Box-level belt (defensive, order-independent):** a `run_as: root`
-               `chmod 1777 /tmp` step that composes **after** the pre-pull, plus a
-               `check:` asserting `stat -c '%a' /tmp` = `1777`. Compose it LAST — but
-               note the emitter orders candies by global popularity, not authored
-               position, so verify the emitted `chmod` line lands *after* the nested
-               runtime's RUN in the generated Containerfile rather than trusting the
-               authored order.
+               is `opencharly/sdk` — the emitter moves `EmitDownload`
+               (`/tmp/downloads`) and `EmitCmd`'s non-root `/tmp/npm-cache` to
+               `/var/cache/charly/...`. It is a **named batch member** of
+               opencharly/distro-cachyos#95 ("/tmp build-cache cutover — retire the
+               tmp-sticky belt once the SDK emitter is repinned"), which also carries
+               the `layer-claude-code` staging fix and the belt's retirement. Once the
+               SDK is repinned, no candy leaves `/tmp` at `0755` and the belt below is
+               removed.
+            2. **Interim belt (defensive, order-independent, TEMPORARY):** until that
+               repin, a `run_as: root` `chmod 1777 /tmp` step composed **after** the
+               pre-pull, plus a `check:` asserting `stat -c '%a' /tmp` = `1777`. This
+               is a stopgap for images built by the CURRENT emitter — the product
+               defect it works around is the emitter's cache location (item 1), and
+               the belt is deleted when item 1 lands (R5), not kept as the fix. Compose
+               it LAST — but note the emitter orders candies by global popularity, not
+               authored position, so verify the emitted `chmod` line lands *after* the
+               nested runtime's RUN in the generated Containerfile rather than trusting
+               the authored order.
             
             A `download:` step that stages into `/tmp` as uid 1000 (e.g.
             `to: /tmp/foo-install.sh`) is a downstream **victim** — it fails once the
             pre-pull has already corrupted `/tmp` earlier in the same build; fix the
-            trigger (1), and keep such staging out of `/tmp`.
+            trigger (item 1), and keep such staging out of `/tmp`.
             
             ## Used In Boxes
             
