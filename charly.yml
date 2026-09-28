@@ -1,7 +1,5 @@
-version: 2026.232.0520
 container-nesting:
     candy:
-        version: 2026.185.1940
         description: |
             Rootless nested podman/buildah/skopeo inside a rootless outer container -- zero added capabilities, no --privileged.
             Ports quay.io/podman/stable's canonical rootless-in-rootless configuration
