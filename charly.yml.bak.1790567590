@@ -1,5 +1,7 @@
+version: 2026.232.0520
 container-nesting:
     candy:
+        version: 2026.185.1940
         description: |
             Rootless nested podman/buildah/skopeo inside a rootless outer container -- zero added capabilities, no --privileged.
             Ports quay.io/podman/stable's canonical rootless-in-rootless configuration
@@ -377,6 +379,7 @@ container-nesting:
               command:
                 command: podman run --rm --pull=never quay.io/libpod/alpine:latest /bin/true
                 in_container: true
+
 container-nesting-skill:
     skill:
         name: container-nesting
@@ -392,18 +395,18 @@ container-nesting-skill:
             or any "rootless-in-rootless podman" question.
         content: |
             # container-nesting -- Rootless nested podman, buildah, skopeo
-
+            
             ## Overview
-
+            
             Adds everything needed to run **rootless** podman/buildah/skopeo **inside
             a rootless outer container** — at the default uid 1000, with zero added
             capabilities, no `--privileged`, no `seccomp=unconfined`, no
             `label=disable`. The recipe is a direct port of `quay.io/podman/stable`'s
             canonical configuration, ported into the charly candy system so any box
             can compose it.
-
+            
             ## Candy Properties
-
+            
             | Property | Value |
             |----------|-------|
             | `cap_add` | **(none)** |
@@ -411,15 +414,15 @@ container-nesting-skill:
             | `devices` | `/dev/fuse`, `/dev/net/tun` |
             | Volumes | `storage` at `/var/lib/containers/storage` (only used by root images) |
             | Env | `CHARLY_BUILD_ENGINE=podman`, `CHARLY_RUN_ENGINE=podman`, `_CONTAINERS_USERNS_CONFIGURED=""`, `BUILDAH_ISOLATION=chroot` |
-
+            
             ## Packages
-
+            
             **RPM:** `buildah`, `fuse-overlayfs`, `shadow-utils`, `skopeo`,
             `tailscale`, `libsecret` (Tailscale from the `tailscale-stable` repo).
-
+            
             **Pacman:** `buildah`, `crun`, `fuse-overlayfs`, `libsecret`, `podman`,
             `shadow`, `skopeo`, `tailscale`.
-
+            
             **Arch must declare `podman` and `crun` explicitly:** the candy's whole
             purpose is **rootless nested podman**, and the `containers.conf` shipped
             by this candy explicitly sets `runtime = "crun"`. RPM users get `podman`
@@ -427,42 +430,42 @@ container-nesting-skill:
             pull, so both `podman` and `crun` are declared explicitly in the `pac:`
             list (declaring `docker` instead, or omitting `crun`, leaves the
             Arch-based box with no `podman` binary in `$PATH`).
-
+            
             ## The kernel-level RCA (why none of the obvious fixes work)
-
+            
             This is the load-bearing section — if you're here because "nested
             podman fails with `crun: mount proc to proc: Operation not permitted`",
             read this before trying anything else.
-
+            
             ### What actually fails
-
+            
             When the inner podman starts a new container (e.g., alpine) inside a
             rootless outer container, `crun` tries to mount a fresh procfs for the
             new container's mount namespace. The call is roughly:
-
+            
             ```c
             mount("proc", "/proc", "proc", MS_NOSUID|MS_NODEV|MS_NOEXEC, NULL);
             ```
-
+            
             The Linux kernel refuses with `EPERM`. Not because of capabilities,
             not because of seccomp, not because of SELinux.
-
+            
             ### Why the kernel refuses
-
+            
             `fs/namespace.c:mount_too_revealing()` is a security check introduced
             to prevent information leakage across user-namespace boundaries. It
             rejects a procfs mount when:
-
+            
             - The calling process is in a **descendant user namespace** of the
               existing procfs's owning user namespace, AND
             - The existing procfs has **submounts** that the new mount would
               expose (the classic example: `/proc/kcore` has been bind-mounted
               over with `/dev/null` to hide kernel memory, and a fresh mount
               would "un-hide" it).
-
+            
             Podman's default rootless outer container generates an OCI spec with
             `linux.maskedPaths` covering:
-
+            
             ```
             /sys/kernel, /proc/acpi, /proc/kcore, /proc/keys,
             /proc/latency_stats, /proc/sched_debug, /proc/scsi,
@@ -470,16 +473,16 @@ container-nesting-skill:
             /sys/devices/virtual/powercap, /sys/firmware,
             /sys/fs/selinux, /proc/interrupts
             ```
-
+            
             Each of these paths is either bind-mounted over with `/dev/null` or
             mounted as a read-only tmpfs. When the inner container tries to mount
             its own fresh `/proc`, the kernel sees that would reveal those paths
             → `mount_too_revealing` → `EPERM`.
-
+            
             ### Why capability-based fixes don't work
-
+            
             Empirically tested:
-
+            
             | Attempt | Result |
             |---|---|
             | `--cap-add=SYS_ADMIN` | FAIL — caps aren't the issue |
@@ -487,69 +490,69 @@ container-nesting-skill:
             | `--cap-add=ALL --security-opt seccomp=unconfined --security-opt label=disable` | FAIL — caps + seccomp + SELinux aren't the issue |
             | `--privileged` | PASS — but only because `--privileged` coincidentally also removes the masked_paths |
             | `--security-opt unmask=/proc/*` | **PASS** — surgical fix, no caps needed |
-
+            
             `unmask=/proc/*` tells podman NOT to emit those `maskedPaths` entries
             for /proc on the outer container. With nothing to mismatch,
             `mount_too_revealing` has nothing to reject. The inner `/proc` mount
             proceeds cleanly.
-
+            
             This candy's `security:` block is `security_opt: [unmask=/proc/*]` +
             `devices: [/dev/fuse, /dev/net/tun]`. No capability added. No seccomp
             touched. No SELinux touched. The surgical minimum.
-
+            
             ### Security trade-off
-
+            
             `unmask=/proc/*` exposes `/proc/kcore` (kernel memory) and
             `/proc/keys` (kernel keyring) on the outer container's filesystem.
-
+            
             Reading those files still requires `CAP_SYS_ADMIN` **in the init user
             namespace** — which a rootless container never has. The actual
             information leak is minimal. Compared to `--privileged` (which
             ALSO removes the masks, plus grants every capability, plus disables
             seccomp, plus passes through every host device, plus disables path
             masking entirely), this is the least-privilege fix available.
-
+            
             ## Subuid / subgid layout (must fit inside the outer namespace)
-
+            
             `charly shell` launches the outer container with `--userns=keep-id:uid=1000,gid=1000`
             (default — the keep-id userns arg is emitted by `candy/plugin-deploy-pod/resolve_f12.go`;
             the `charly shell` command itself is `candy/plugin-pod/command.go`, the former
             `charly/shell.go` is DELETED, K-wave 2). That creates a uid_map inside the
             outer of:
-
+            
             ```
             0    1000    1           # inner uid 0 → host uid 1000
             1    100000  65535       # inner uid 1-65535 → host uid 100000-165534
             ```
-
+            
             So inside the outer, **only inner uids 0-65535 exist**. Subid
             delegation ranges that fall outside this window fail at
             `newuidmap write to uid_map: EPERM`.
-
+            
             The candy emits two non-overlapping ranges for the primary uid-1000
             user, skipping uid 1000 itself (because keep-id already owns it):
-
+            
             ```
             user:1:999
             user:1001:64535
             ```
-
+            
             …plus a full-range entry for root (used by `charly-fedora`/`charly-arch`/
             `githubrunner`, which run as uid 0):
-
+            
             ```
             root:1:65535
             ```
-
+            
             This pattern matches `quay.io/podman/stable`'s `/etc/subuid` layout
             exactly. A range like `524288:65536` would fall outside the outer
             namespace's mapped window and cause an obscure `newuidmap` write
             failure — the delegation ranges MUST fit inside the keep-id window.
-
+            
             The `newuidmap`/`newgidmap` binaries get `cap_setuid=ep` / `cap_setgid=ep`
             file capabilities (via a dedicated task) so any uid invoking them can
             delegate subids.
-
+            
             **The `setcap(8)` binary MUST be installed for that task to do anything.**
             Fedora and Arch ship it transitively (`libcap` is in the base image), but
             Debian/Ubuntu do NOT — so the candy's deb sections declare **`libcap2-bin`**
@@ -560,17 +563,17 @@ container-nesting-skill:
             `newuidmap: open of uid_map failed: Permission denied`). RDD-confirmed
             This is the one non-format-agnostic deb dependency — every other
             piece of the recipe is shared.
-
+            
             ## Config files — written to both system-wide and user locations
-
+            
             Rootless podman **prefers `~/.config/containers/*` over `/etc/containers/*`**.
             Writing only the system-wide location is a no-op for the desktop user.
             This candy writes every config to both locations.
-
+            
             ### `containers.conf`
-
+            
             Identical at `/etc/containers/containers.conf` and `~/.config/containers/containers.conf`:
-
+            
             ```ini
             [containers]
             cgroups = "disabled"
@@ -580,15 +583,15 @@ container-nesting-skill:
             userns = "host"
             utsns = "host"
             log_driver = "k8s-file"
-
+            
             [engine]
             cgroup_manager = "cgroupfs"
             events_logger = "file"
             runtime = "crun"
             ```
-
+            
             Why each setting:
-
+            
             - `cgroups = "disabled"` — rootless cgroupv2 delegation isn't
               guaranteed at nesting depth 2+; disabling avoids "cannot set up
               cgroup" errors.
@@ -604,77 +607,77 @@ container-nesting-skill:
             - `ipcns`, `utsns`, `cgroupns = "host"` — match the canonical
               `quay.io/podman/stable` config; prevents a cascade of namespace
               permission errors observed when only some are set.
-
+            
             ### `storage.conf`
-
+            
             System-wide (for root images) at `/etc/containers/storage.conf`:
-
+            
             ```ini
             [storage]
             driver = "overlay"
             runroot = "/run/containers/storage"
             graphroot = "/var/lib/containers/storage"
-
+            
             [storage.options.overlay]
             mount_program = "/usr/bin/fuse-overlayfs"
             mountopt = "nodev,fsync=0"
             ```
-
+            
             User-level (for uid-1000 images) at `~/.config/containers/storage.conf` —
             **different graphroot** so it's user-writable:
-
+            
             ```ini
             [storage]
             driver = "overlay"
             runroot = "${HOME}/.local/share/containers/run"
             graphroot = "${HOME}/.local/share/containers/storage"
-
+            
             [storage.options.overlay]
             mount_program = "/usr/bin/fuse-overlayfs"
             mountopt = "nodev,fsync=0"
             ```
-
+            
             `mount_program = "/usr/bin/fuse-overlayfs"` is the critical line —
             the kernel overlay driver can't mount from a rootless outer (no
             `CAP_SYS_ADMIN` in init userns); `fuse-overlayfs` can.
-
+            
             If the user-level file is missing, rootless podman uses the system
             default, which points at `/var/lib/containers/storage` — unwritable by
             uid 1000 → `mkdir graphroot: permission denied` on first `podman run`.
-
+            
             ### `policy.json`
-
+            
             Same content at both `/etc/containers/policy.json` and
             `~/.config/containers/policy.json`:
-
+            
             ```json
             {"default":[{"type":"insecureAcceptAnything"}]}
             ```
-
+            
             Without this, `podman pull` fails with `no policy.json file found`.
-
+            
             ## Env vars — the two hidden contracts
-
+            
             | Env var | Value | Role |
             |---|---|---|
             | `_CONTAINERS_USERNS_CONFIGURED` | `""` (empty string, SET not UNSET) | Tells the inner podman "you're already inside a rootless user namespace". Without this, the inner re-execs itself via `newuidmap` to create a new descendant user namespace — defeating `userns=host` in containers.conf and re-triggering `mount_too_revealing`. |
             | `BUILDAH_ISOLATION` | `chroot` | Tells buildah RUN steps to use chroot isolation instead of the OCI runtime. Without this, nested `podman build` falls back to OCI isolation which creates a descendant user namespace and hits the same kernel check. |
-
+            
             Both are baked into the candy's `env:` section so they land in the
             OCI env of any box composing this candy.
-
+            
             ## Box-level compatibility (union semantics)
-
+            
             `sdk/deploykit/security.go` (`SecurityArgs`'s merge, via `AppendUnique`) **unions**
             box-level `CapAdd`, `SecurityOpt`,
             `Devices` onto the candy-level merged set. Box
             values can only ADD, never strip.
-
+            
             Consequence: boxes that want the old full-hammer posture
             (`charly-fedora`, `charly-arch`, `githubrunner`) must assert it at the box
             level, not expect this candy to donate it. Their `charly.yml` entries
             carry:
-
+            
             ```yaml
             security:
               cap_add: [ALL]
@@ -682,21 +685,21 @@ container-nesting-skill:
                 - label=disable
                 - seccomp=unconfined
             ```
-
+            
             The resolved OCI label then unions to
             `cap_add:[ALL] + security_opt:[unmask=/proc/*, label=disable, seccomp=unconfined]`,
             which matches their historical posture.
-
+            
             Rootless boxes like `/charly-openclaw:openclaw-desktop` don't add a
             box-level `security:` block, so the resolved posture stays at
             `security_opt:[unmask=/proc/*]` only — zero capability escalation.
-
+            
             ## Cross-distro coverage
-
+            
             `rpm:` (Fedora), `pac:` (Arch), plus per-distro deb sections (`debian:` / `debian-13:` / `ubuntu:` / `ubuntu-24.04:`) over the shared deb package set (`podman`, `buildah`, `skopeo`, `fuse-overlayfs`, `crun`, `uidmap`, `passwd`, `libsecret-1-0`, plus **`libcap2-bin`** — the `setcap` provider, see the subuid/subgid section above). The version-specific `debian-13:` / `ubuntu-24.04:` sections additionally declare the Tailscale apt repo (`https://pkgs.tailscale.com/stable/debian` or `.../ubuntu`) with signed-by key for the `tailscale` package. Drops on deb: none at the nesting recipe level — all the critical pieces (containers.conf, storage.conf, subuid layout, `_CONTAINERS_USERNS_CONFIGURED=""` env) are format-agnostic task content; the sole deb-only addition is `libcap2-bin`.
-
+            
             ## Usage — rootless image (uid 1000)
-
+            
             ```yaml
             # charly.yml
             openclaw-desktop:
@@ -710,9 +713,9 @@ container-nesting-skill:
                 - ...
               # NO uid/gid/user/network override
             ```
-
+            
             ## Usage — root image (uid 0)
-
+            
             ```yaml
             # charly.yml
             charly-fedora:
@@ -731,20 +734,20 @@ container-nesting-skill:
                 - container-nesting
                 - ...
             ```
-
+            
             Both paths work; they just resolve to different OCI security labels.
-
+            
             ## Verification
-
+            
             ```bash
             # Rootless posture on openclaw-desktop
             charly box inspect openclaw-desktop | jq '.HostConfig? // .Config.Labels."ai.opencharly.security"'
             # → cap_add:[], security_opt:[unmask=/proc/*], devices:[/dev/fuse,/dev/net/tun]
-
+            
             # Nested podman smoke (inside the running container)
             charly shell openclaw-desktop -c 'podman run --rm quay.io/libpod/alpine:latest true'
             # → exit 0, NO "mount proc to proc: Operation not permitted"
-
+            
             # Diagnostic: inspect the OCI spec generated for a nested container
             charly shell openclaw-desktop -c '
               podman create --name t quay.io/libpod/alpine:latest /bin/true >/dev/null
@@ -752,26 +755,26 @@ container-nesting-skill:
               jq ".linux.maskedPaths" "$sf"'
             # → empty list or no /proc entries = unmask worked
             ```
-
+            
             If `mount proc to proc: EPERM` still happens after a rebuild, check in
             this order:
-
+            
             1. `env | grep _CONTAINERS_USERNS_CONFIGURED` — must print one line with empty value (SET, not UNSET).
             2. `grep '^userns' /etc/containers/containers.conf ~/.config/containers/containers.conf` — both must say `host`.
             3. `cat /etc/subuid` — must show the 1:999 + 1001:64535 pattern for the primary user.
             4. `podman inspect <outer-container> --format '{{.HostConfig.SecurityOpt}}'` — must include `unmask=/proc/*`.
-
+            
             ## Build-time `/tmp` corruption (the pre-pull trigger)
-
+            
             A box composing this candy can ship an image whose `/tmp` is
             `root:root 0755` instead of `1777`, after which every uid-1000 writer of
             `/tmp` fails at container start:
-
+            
             ```
             supervisord: logfile=/tmp/supervisord.log — Permission denied
             pod-dbus:    unix:path=/tmp/dbus-session — EACCES
             ```
-
+            
             **Mechanism (RCA 2026-09-24, proven by a controlled 2×2 and by instrumented
             build probes):** a BuildKit **cache mount rooted under `/tmp`**
             (`--mount=type=cache,...,dst=/tmp/...`) combined with a **nested container
@@ -779,26 +782,26 @@ container-nesting-skill:
             **materialise `/tmp` at the process umask (`0755`)** instead of preserving
             the lower layer's `1777`; the change is committed into the image. Either
             factor alone is harmless — only the combination breaks it:
-
+            
             | cache dst | nested runtime in the same RUN | image `/tmp` |
             |---|---|---|
             | — | — | 1777 |
             | `/tmp/npm-cache` | no | 1777 |
             | outside `/tmp` | yes | 1777 |
             | `/tmp/npm-cache` | yes | **755** |
-
+            
             This candy's **pre-pull step is exactly that combination** — a `command:`
             step run as `${USER}` (non-root) to which the emitter attaches a
             `dst=/tmp/npm-cache` cache, whose command is a `podman pull`. So *any* box
             composing `container-nesting` was affected; the trigger is not the box's
             own steps. The host `/tmp` is untouched (rootless isolation holds — the
             `0755` lives in the image's own overlay layer).
-
+            
             **Detect** (build scope): `podman run --rm --entrypoint /bin/sh <image> -c
             'stat -c "%a %U:%G" /tmp'` must print `1777 root:root`.
-
+            
             **Fix** — two layers, root fix first:
-
+            
             1. **Root (source):** the emitter's caches must not live under `/tmp`. This
                is `opencharly/sdk` — the emitter moves `EmitDownload`
                (`/tmp/downloads`) and `EmitCmd`'s non-root `/tmp/npm-cache` to
@@ -818,42 +821,42 @@ container-nesting-skill:
                authored position, so verify the emitted `chmod` line lands *after* the
                nested runtime's RUN in the generated Containerfile rather than trusting
                the authored order.
-
+            
             A `download:` step that stages into `/tmp` as uid 1000 (e.g.
             `to: /tmp/foo-install.sh`) is a downstream **victim** — it fails once the
             pre-pull has already corrupted `/tmp` earlier in the same build; fix the
             trigger (item 1), and keep such staging out of `/tmp`.
-
+            
             ## Used In Boxes
-
+            
             - `/charly-openclaw:openclaw-desktop` — rootless path; box-level adds nothing
             - `/charly-distros:charly-fedora` — root path; box-level adds `cap_add:[ALL] + security_opt:[label=disable, seccomp=unconfined]`
             - `/charly-coder:charly-arch` — same root path as charly-fedora
             - `/charly-distros:githubrunner` — same root path; doesn't compose the full charly toolchain but keeps nested podman for CI workloads
-
+            
             ## Related Candies
-
+            
             - `/charly-tools:charly` — pairs with container-nesting in charly-toolchain images (the full toolchain: `charly` binary + VM + encrypted storage tools)
             - `/charly-infrastructure:virtualization` — supervisord-managed rootless libvirt (`virtqemud`, `virtnetworkd`). Pairs with container-nesting for images that need both nested containers AND nested VMs
             - `/charly-coder:sshd` — sibling enabling remote access to nested-container hosts
-
+            
             ## Related Commands
-
+            
             - `/charly-build:build` — build images that ship nested podman
             - `/charly-core:shell` — run nested podman/buildah commands inside the outer
             - `/charly-build:generate` — Containerfile generation (the `service:` supervisord fragments for container-nesting consumers go through the fragment_assembly init model)
             - `/charly-core:charly-config` — box-level `security:` union with candy-level when deploying
-
+            
             ## When to Use This Skill
-
+            
             **MUST be invoked** when:
-
+            
             - Authoring or debugging any candy/box that needs nested podman, buildah, or skopeo.
             - Chasing `mount_too_revealing` / `mount proc to proc: Operation not permitted` errors — this is the authoritative RCA.
             - Choosing between `--privileged`, `cap_add: ALL`, and `unmask=/proc/*` — this skill documents why the surgical `unmask` fix is the minimum-privilege path and the others are hammers.
             - Evaluating the security posture of `/charly-openclaw:openclaw-desktop`, `/charly-distros:charly-fedora`, `/charly-coder:charly-arch`, or `/charly-distros:githubrunner`.
-
+            
             ## Related
-
+            
             - `/charly-image:layer` — candy authoring reference (`charly.yml` schema, task verbs, service declarations)
             - `/charly-check:check` — declarative testing (`check:` block, `charly check box`, `charly check live`)
