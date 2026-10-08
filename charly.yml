@@ -688,7 +688,7 @@ container-nesting-skill:
             `cap_add:[ALL] + security_opt:[unmask=/proc/*, label=disable, seccomp=unconfined]`,
             which matches their historical posture.
             
-            Rootless boxes like `/charly-openclaw:openclaw-desktop` don't add a
+            Rootless boxes like `/charly-distros:charly-fedora` don't add a
             box-level `security:` block, so the resolved posture stays at
             `security_opt:[unmask=/proc/*]` only — zero capability escalation.
             
@@ -827,7 +827,6 @@ container-nesting-skill:
             
             ## Used In Boxes
             
-            - `/charly-openclaw:openclaw-desktop` — rootless path; box-level adds nothing
             - `/charly-distros:charly-fedora` — root path; box-level adds `cap_add:[ALL] + security_opt:[label=disable, seccomp=unconfined]`
             - `/charly-coder:charly-arch` — same root path as charly-fedora
             - `/charly-distros:githubrunner` — same root path; doesn't compose the full charly toolchain but keeps nested podman for CI workloads
@@ -852,7 +851,7 @@ container-nesting-skill:
             - Authoring or debugging any candy/box that needs nested podman, buildah, or skopeo.
             - Chasing `mount_too_revealing` / `mount proc to proc: Operation not permitted` errors — this is the authoritative RCA.
             - Choosing between `--privileged`, `cap_add: ALL`, and `unmask=/proc/*` — this skill documents why the surgical `unmask` fix is the minimum-privilege path and the others are hammers.
-            - Evaluating the security posture of `/charly-openclaw:openclaw-desktop`, `/charly-distros:charly-fedora`, `/charly-coder:charly-arch`, or `/charly-distros:githubrunner`.
+            - Evaluating the security posture of `/charly-distros:charly-fedora`, `/charly-coder:charly-arch`, or `/charly-distros:githubrunner`.
             
             ## Related
             
