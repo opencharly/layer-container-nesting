@@ -47,11 +47,10 @@ Per-distro packages:
 Compose the layer by pinning this repo in a box's `candy:` list:
 
 ```yaml
-openclaw-desktop:
+charly-arch:
   base: cachyos.cachyos
   candy:
     - selkies-desktop
-    - openclaw-full
     - container-nesting      # donates unmask + devices + config + env
 ```
 
