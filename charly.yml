@@ -364,11 +364,33 @@ container-nesting:
               exit_status: 0
               command: sh -c 'env | grep -qx "BUILDAH_ISOLATION=chroot"'
             - run: |
-                podman pull quay.io/libpod/alpine:latest
-              description: pre-pull the alpine image into the nested store at build time so the runtime nested-podman-run check needs no network (the outer container's aardvark-dns cannot resolve quay.io on some hosts; the build container has working network, so the pull happens here and the runtime check uses --pull=never)
-              run_as: "${USER}"
+                mkdir -p /usr/share/charly/nesting-smoke && skopeo copy docker://quay.io/libpod/alpine:latest dir:/usr/share/charly/nesting-smoke
+              description: >-
+                  fetch the alpine image into a local OCI layout at build time so no runtime
+                  step needs network (the outer container's aardvark-dns cannot resolve quay.io
+                  on some hosts; the build container has working network). The build worker is
+                  the sandboxed one and denies unshare(CLONE_NEWUSER), which every
+                  containers-storage driver needs, so this step only lands the bytes — the
+                  runtime step below materialises them into the user store.
               command: |
-                podman pull quay.io/libpod/alpine:latest
+                mkdir -p /usr/share/charly/nesting-smoke && skopeo copy docker://quay.io/libpod/alpine:latest dir:/usr/share/charly/nesting-smoke
+            - check: the build-fetched OCI layout is baked into the image
+              id: nesting-smoke-layout
+              file:
+                file: /usr/share/charly/nesting-smoke/manifest.json
+                exists: true
+            - run: |
+                skopeo copy dir:/usr/share/charly/nesting-smoke containers-storage:quay.io/libpod/alpine:latest
+              description: >-
+                  materialise the build-fetched alpine layout into the user's containers-storage
+                  so the nested-podman-run check needs no network. Runs at deploy time, where the
+                  container's own user namespace is available — the build worker denies
+                  unshare(CLONE_NEWUSER), so this cannot happen at build time.
+              run_as: "${USER}"
+              context:
+                - runtime
+              command: |
+                skopeo copy dir:/usr/share/charly/nesting-smoke containers-storage:quay.io/libpod/alpine:latest
             - check: command=podman run --rm --pull=never quay.io/libpod/alpine:latest /bin/true
               id: nested-podman-run
               timeout: 60s
