@@ -140,7 +140,6 @@ container-nesting:
                 # that can mask later failures.
                 - /dev/net/tun
         env:
-            CHARLY_BUILD_ENGINE: "podman"
             CHARLY_RUN_ENGINE: "podman"
             # These two env vars are the hidden contract that makes rootless-in-rootless
             # podman work without --privileged:

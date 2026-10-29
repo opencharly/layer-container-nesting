@@ -27,7 +27,7 @@ subuid/subgid ranges that fit inside the outer keep-id window.
 | Security opt | `unmask=/proc/*` |
 | Devices | `/dev/fuse`, `/dev/net/tun` |
 | Binaries | `podman`, `buildah`, `skopeo`, `fuse-overlayfs`, `newuidmap`/`newgidmap` (file caps) |
-| Environment | `CHARLY_BUILD_ENGINE=podman`, `CHARLY_RUN_ENGINE=podman`, `_CONTAINERS_USERNS_CONFIGURED=""`, `BUILDAH_ISOLATION=chroot` |
+| Environment | `CHARLY_RUN_ENGINE=podman`, `_CONTAINERS_USERNS_CONFIGURED=""`, `BUILDAH_ISOLATION=chroot` |
 | Volume | `storage` → `/var/lib/containers/storage` (root images only) |
 | Service / port | none |
 
