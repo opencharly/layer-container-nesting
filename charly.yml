@@ -99,6 +99,18 @@ container-nesting:
                       key: "https://pkgs.tailscale.com/stable/ubuntu/noble.noarmor.gpg"
                       suite: noble
                       components: main
+            ubuntu-26.04:
+                # 26.04 is the org default; it needs the resolute suite, and it does NOT
+                # match the ubuntu-24.04 section above. Packages union with the generic
+                # `ubuntu:` section, so only the tailscale package and its repo are added.
+                package:
+                    - tailscale
+                repo:
+                    - name: tailscale
+                      url: "https://pkgs.tailscale.com/stable/ubuntu"
+                      key: "https://pkgs.tailscale.com/stable/ubuntu/resolute.noarmor.gpg"
+                      suite: resolute
+                      components: main
         volume:
             - name: storage
               path: /var/lib/containers/storage
